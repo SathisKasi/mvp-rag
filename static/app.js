@@ -109,7 +109,7 @@ function makeMessage(role, text, sources = []) {
   body.className = "message-body";
   const label = document.createElement("p");
   label.className = "message-label";
-  label.textContent = role === "user" ? "YOU" : "BLUEBOOK";
+  label.textContent = role === "user" ? "YOU" : "SATHIS RAG";
   const bubble = document.createElement("div");
   bubble.className = "message-bubble";
   bubble.textContent = text;

@@ -17,7 +17,7 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
-app = FastAPI(title="Document Chat")
+app = FastAPI(title="SATHIS RAG")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 

@@ -1,4 +1,4 @@
-# Bluebook Document Chat
+# SATHIS RAG
 
 ## Run the Document Chat App
 
