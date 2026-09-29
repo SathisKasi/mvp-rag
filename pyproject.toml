@@ -14,7 +14,10 @@ dependencies = [
     "langchain>=1.4.3",
     "pypdf",
     "python-dotenv",
-    "langchain_chroma"
+    "langchain_chroma",
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart"
 ]
 
 [project.scripts]
