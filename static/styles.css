@@ -91,6 +91,10 @@ button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 3px sol
 .empty-library-mark { display: grid; width: 34px; height: 40px; place-items: center; border: 1px solid #d6e2f1; border-radius: 5px; color: #88a1c4; background: rgb(255 255 255 / 75%); font-size: 8px; font-weight: 700; letter-spacing: .5px; }
 .empty-library p { margin: 0; font-size: 11px; line-height: 1.6; }
 .document-item { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 9px 8px; border: 1px solid transparent; border-radius: 7px; background: rgb(255 255 255 / 65%); animation: rise-in 280ms ease both; }
+.delete-document-button { display: grid; flex: 0 0 28px; width: 28px; height: 28px; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 6px; color: #71819a; background: transparent; cursor: pointer; opacity: .75; }
+.delete-document-button:hover { border-color: #f1c9c5; color: #b33c32; background: #fff5f4; opacity: 1; }
+.delete-document-button:disabled { cursor: wait; opacity: .45; }
+.delete-document-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
 .pdf-mark { display: grid; flex: 0 0 30px; width: 30px; height: 34px; place-items: center; border: 1px solid #f2d5d2; border-radius: 5px; color: #c4544b; background: #fff9f8; font-size: 8px; font-weight: 700; }
 .document-meta { display: grid; gap: 3px; min-width: 0; }
 .document-meta strong { overflow: hidden; color: #354965; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }

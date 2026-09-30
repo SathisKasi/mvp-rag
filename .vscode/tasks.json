@@ -32,6 +32,28 @@
 			],
 			"isBackground": true,
 			"problemMatcher": []
+		},
+		{
+			"label": "Refresh Python dependency lock",
+			"type": "shell",
+			"command": "uv",
+			"args": [
+				"lock"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Sync PostgreSQL app dependencies",
+			"type": "shell",
+			"command": "uv",
+			"args": [
+				"sync",
+				"--group",
+				"migration"
+			],
+			"isBackground": false,
+			"problemMatcher": []
 		}
 	]
 }

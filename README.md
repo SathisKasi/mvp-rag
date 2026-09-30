@@ -23,24 +23,49 @@ The following steps use Windows PowerShell. You need Python 3.10 or newer and `u
 	uv sync
 	```
 
-4. Create a `.env` file in the project folder and add your provider API keys:
+4. In pgAdmin 4, verify the server connection uses host `localhost` and port `5433`. Under that server's `Databases` node, confirm a database named exactly `mvp-rag` exists. If it is missing, right-click `Databases`, choose **Create > Database**, enter `mvp-rag` as the name, and save. Then connect to that database, open its Query Tool, and enable pgvector:
 
 	```text
-	GROQ_API_KEY=your-groq-api-key
-	GOOGLE_API_KEY=your-google-api-key
+	CREATE EXTENSION IF NOT EXISTS vector;
 	```
 
-	Replace the example values with your own keys. Keep `.env` private; it is excluded from Git.
+	The application connects to PostgreSQL directly; pgAdmin is used to manage and inspect the database. If PostgreSQL reports that the `vector` extension is unavailable, install pgvector for your PostgreSQL server before continuing.
 
-5. Start the SATHIS RAG web application:
+5. Copy the environment template and edit `.env` locally:
+
+	```powershell
+	Copy-Item .env.example .env
+	notepad .env
+	```
+
+	Enter your Groq and Google API keys and your PostgreSQL password in `.env`. The connection defaults are `localhost:5433`, database `mvp-rag`, and user `postgres`. Keep `.env` private; it is excluded from Git. Do not put credentials in source code or commit them.
+
+6. If you have existing records in the project's `chroma_db` folder that you want to keep, install the optional migration dependency and import the stored text, embeddings, and metadata:
+
+	```powershell
+	uv sync --group migration
+	uv run python migrate_chroma.py
+	```
+
+	This step is optional for a fresh setup. The migration script can be run again safely; already migrated records are skipped.
+
+7. Start the SATHIS RAG web application:
 
 	```powershell
 	uv run uvicorn web_app:app --reload --host 127.0.0.1 --port 8000
 	```
 
-6. Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser. Choose or drop in a PDF, wait for indexing to finish, then enter a question or choose a suggested question.
+8. Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser. Choose or drop in one or more PDFs, wait for indexing to finish, then enter a question or choose a suggested question. Previously added documents load from PostgreSQL when the page opens; use the delete button beside a document to remove that file and its indexed vectors.
 
-PDF text is split into chunks, embedded, and stored in the local `chroma_db` collection. Relevant text is sent to the configured Google embedding and Groq language-model APIs. The uploaded PDF itself is processed from a temporary file and is not saved in the project folder.
+You can also index PDFs from PowerShell through the same deduplicating upload path:
+
+```powershell
+uv run python ingestion.py "D:\Documents\first.pdf" "D:\Documents\second.pdf"
+```
+
+PDF text is split into chunks, embedded, and stored in the PostgreSQL `MVP_RAG` pgvector collection. File names, content hashes, and page/chunk counts are tracked in the `rag_documents` table in the same `mvp-rag` database. Relevant text is sent to the configured Google embedding and Groq language-model APIs. The uploaded PDF itself is processed from a temporary file and is not saved in the project folder.
+
+Uploading a PDF with identical file contents again skips chunks already stored in PostgreSQL. If an earlier upload inserted only some chunks, re-uploading adds only the missing chunks. Deleting a listed document removes its vector IDs and registry entry.
 
 The running server also keeps a bounded in-memory semantic cache for one hour. It reuses an answer only when a new question's embedding is at least 0.98 cosine-similar to a cached question. Uploading a PDF clears the cache, and restarting the server starts with an empty cache. The chat API request and response format are unchanged.
 
@@ -49,6 +74,8 @@ Uploads are limited to 25 MB and must have a PDF filename and PDF file signature
 7. When finished, return to PowerShell and press `Ctrl+C` to stop the server.
 
 If port 8000 is already in use, start the app with `--port 8001` and open `http://127.0.0.1:8001` instead.
+
+If startup reports `database "mvp-rag" does not exist`, the server at the configured host and port does not contain that exact database. Check the server's port in pgAdmin and verify the database name. If the database was created on another port, set `POSTGRES_PORT` in `.env` to that port; otherwise create `mvp-rag` under the server listening on `localhost:5433`.
 
 ## Push This Project to GitHub
 

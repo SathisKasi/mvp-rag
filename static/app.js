@@ -27,12 +27,12 @@ function showToast(message) {
   toastTimer = window.setTimeout(() => toast.classList.remove("visible"), 2800);
 }
 
-function addDocument({ filename, pages, chunks }) {
-  const key = filename;
+function addDocument({ id, filename, pages, chunks }) {
+  const key = id || filename;
   if (uploadedFiles.has(key)) {
     uploadedFiles.set(key, { pages, chunks });
     const existing = [...documentList.querySelectorAll(".document-item")]
-      .find((item) => item.dataset.filename === key);
+      .find((item) => item.dataset.documentId === key);
     if (existing) existing.remove();
   } else {
     uploadedFiles.set(key, { pages, chunks });
@@ -41,7 +41,7 @@ function addDocument({ filename, pages, chunks }) {
   emptyLibrary.hidden = true;
   const item = document.createElement("div");
   item.className = "document-item";
-  item.dataset.filename = filename;
+  item.dataset.documentId = key;
 
   const badge = document.createElement("span");
   badge.className = "pdf-mark";
@@ -56,9 +56,46 @@ function addDocument({ filename, pages, chunks }) {
   const detail = document.createElement("span");
   detail.textContent = `${pages} ${pages === 1 ? "page" : "pages"} | ${chunks} text chunks`;
   meta.append(name, detail);
-  item.append(badge, meta);
+  const deleteButton = document.createElement("button");
+  deleteButton.className = "delete-document-button";
+  deleteButton.type = "button";
+  deleteButton.title = `Delete ${filename} from PostgreSQL`;
+  deleteButton.setAttribute("aria-label", `Delete ${filename}`);
+  deleteButton.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 6h11M8 6V4.5h4V6m2.5 0-.6 9.2a1 1 0 0 1-1 .8H7.1a1 1 0 0 1-1-.8L5.5 6m3 3v4m3-4v4"/></svg>';
+  deleteButton.addEventListener("click", () => deleteDocument(key, filename, item, deleteButton));
+  item.append(badge, meta, deleteButton);
   documentList.prepend(item);
   documentCount.textContent = String(uploadedFiles.size);
+}
+
+async function loadDocuments() {
+  const response = await fetch("/api/documents");
+  const result = await readApiResponse(response, "Could not load saved documents.");
+  if (!Array.isArray(result.documents)) throw new Error("The server returned an invalid document list.");
+  emptyLibrary.hidden = result.documents.length > 0;
+  for (const document of result.documents) {
+    if (typeof document.id === "string" && typeof document.filename === "string") {
+      addDocument(document);
+    }
+  }
+}
+
+async function deleteDocument(id, filename, element, button) {
+  if (!window.confirm(`Delete ${filename} and its vectors from PostgreSQL? This cannot be undone.`)) return;
+
+  button.disabled = true;
+  try {
+    const response = await fetch(`/api/documents/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await readApiResponse(response, `Could not delete ${filename}.`);
+    uploadedFiles.delete(id);
+    element.remove();
+    documentCount.textContent = String(uploadedFiles.size);
+    emptyLibrary.hidden = uploadedFiles.size > 0;
+    showStatus(`${filename} and its indexed vectors were deleted.`);
+  } catch (error) {
+    showStatus(error.message || `Could not delete ${filename}.`, true);
+    button.disabled = false;
+  }
 }
 
 async function uploadFile(file) {
@@ -87,8 +124,14 @@ async function uploadFile(file) {
     if (typeof result.filename !== "string" || !Number.isFinite(result.pages) || !Number.isFinite(result.chunks)) {
       throw new Error("The server returned an invalid upload response.");
     }
+    if (result.duplicate) {
+      if (typeof result.id === "string" && !uploadedFiles.has(result.id)) addDocument(result);
+      showStatus(`${result.filename} is already in PostgreSQL. No duplicate chunks were added.`);
+      showToast("Duplicate PDF skipped");
+      return;
+    }
     addDocument(result);
-    showStatus(`${result.filename} is ready. Added ${result.chunks} text chunks from ${result.pages} pages.`);
+    showStatus(`${result.filename} is ready. Added ${result.inserted_chunks ?? result.chunks} text chunks from ${result.pages} pages.`);
     showToast("PDF added to your knowledge base");
   } catch (error) {
     showStatus(error.message || "Upload failed. Check the server and try again.", true);
@@ -220,9 +263,10 @@ async function askQuestion(question) {
 }
 
 uploadTrigger.addEventListener("click", () => fileInput.click());
-fileInput.addEventListener("change", () => {
-  const [file] = fileInput.files || [];
-  if (file) uploadFile(file);
+fileInput.addEventListener("change", async () => {
+  for (const file of Array.from(fileInput.files || [])) {
+    await uploadFile(file);
+  }
 });
 
 for (const eventName of ["dragenter", "dragover"]) {
@@ -238,8 +282,9 @@ for (const eventName of ["dragleave", "drop"]) {
   });
 }
 uploadTrigger.addEventListener("drop", (event) => {
-  const [file] = event.dataTransfer?.files || [];
-  if (file) uploadFile(file);
+  for (const file of Array.from(event.dataTransfer?.files || [])) {
+    uploadFile(file);
+  }
 });
 
 chatForm.addEventListener("submit", (event) => {
@@ -273,4 +318,8 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     document.querySelector("#new-chat").click();
   }
+});
+
+loadDocuments().catch((error) => {
+  showStatus(error.message || "Could not load saved documents.", true);
 });

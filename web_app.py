@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import tempfile
 from pathlib import Path
+from threading import Lock
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -12,7 +14,7 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic import BaseModel, Field
 
-from config import embedding, engine, llm
+from config import document_registry, embedding, engine, llm
 from semantic_cache import semantic_cache
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -20,6 +22,7 @@ STATIC_DIR = BASE_DIR / "static"
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 PDF_HEADER_SEARCH_BYTES = 1024
 logger = logging.getLogger(__name__)
+upload_lock = Lock()
 
 app = FastAPI(title="SATHIS RAG")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -50,6 +53,19 @@ async def upload_pdf(file: UploadFile = File(...)) -> dict[str, object]:
         raise HTTPException(status_code=413, detail="PDFs must be 25 MB or smaller.")
     if b"%PDF-" not in contents[:PDF_HEADER_SEARCH_BYTES]:
         raise HTTPException(status_code=422, detail="The selected file does not appear to be a valid PDF.")
+
+    file_digest = hashlib.sha256(contents).hexdigest()
+    with upload_lock:
+        try:
+            existing_record = document_registry.get(file_digest)
+        except Exception as error:
+            raise HTTPException(status_code=502, detail="Could not check the PostgreSQL document registry.") from error
+    if existing_record is not None:
+        return {
+            **existing_record,
+            "duplicate": True,
+            "inserted_chunks": 0,
+        }
 
     temporary_path: Path | None = None
     try:
@@ -82,19 +98,92 @@ async def upload_pdf(file: UploadFile = File(...)) -> dict[str, object]:
     if not chunks:
         raise HTTPException(status_code=422, detail="No text could be extracted from this PDF.")
 
-    file_digest = hashlib.sha256(contents).hexdigest()
     ids = [f"{file_digest}-{index}" for index in range(len(chunks))]
-    semantic_cache.clear()
-    try:
-        engine.add_documents(chunks, ids=ids)
-    except Exception as error:
-        raise HTTPException(
-            status_code=502,
-            detail="The PDF was read, but could not be saved to the vector database. Check your embedding API key and try again.",
-        ) from error
-    semantic_cache.clear()
+    with upload_lock:
+        try:
+            existing_record = document_registry.get(file_digest)
+            if existing_record is not None:
+                return {
+                    **existing_record,
+                    "duplicate": True,
+                    "inserted_chunks": 0,
+                }
+            existing_ids = {
+                document.id
+                for document in engine.get_by_ids(ids)
+                if document.id is not None
+            }
+        except Exception as error:
+            raise HTTPException(
+                status_code=502,
+                detail="Could not check for an existing copy of this PDF. Please try again.",
+            ) from error
 
-    return {"filename": filename, "pages": len(documents), "chunks": len(chunks)}
+        new_chunks = [chunk for chunk_id, chunk in zip(ids, chunks) if chunk_id not in existing_ids]
+        new_ids = [chunk_id for chunk_id in ids if chunk_id not in existing_ids]
+        if new_chunks:
+            semantic_cache.clear()
+            try:
+                engine.add_documents(new_chunks, ids=new_ids)
+            except Exception as error:
+                raise HTTPException(
+                    status_code=502,
+                    detail="The PDF was read, but could not be saved to PostgreSQL. Check your database and embedding configuration, then try again.",
+                ) from error
+            semantic_cache.clear()
+
+        try:
+            document_registry.register(file_digest, filename, len(documents), len(chunks))
+        except Exception as error:
+            raise HTTPException(
+                status_code=502,
+                detail="The PDF vectors were saved, but the document registry could not be updated. Re-upload to finish indexing.",
+            ) from error
+
+    return {
+        "id": file_digest,
+        "filename": filename,
+        "pages": len(documents),
+        "chunks": len(chunks),
+        "duplicate": not bool(new_chunks),
+        "inserted_chunks": len(new_chunks),
+    }
+
+
+@app.get("/api/documents")
+def list_documents() -> dict[str, object]:
+    try:
+        return {"documents": document_registry.list()}
+    except Exception as error:
+        logger.exception("Could not list PostgreSQL documents")
+        raise HTTPException(status_code=502, detail="Could not load the document list from PostgreSQL.") from error
+
+
+@app.delete("/api/documents/{document_id}")
+def delete_document(document_id: str) -> dict[str, object]:
+    if re.fullmatch(r"[a-f0-9]{64}", document_id) is None:
+        raise HTTPException(status_code=400, detail="Invalid document ID.")
+
+    with upload_lock:
+        try:
+            record = document_registry.get(document_id)
+            if record is None:
+                raise HTTPException(status_code=404, detail="Document not found.")
+
+            vector_ids = [f"{document_id}-{index}" for index in range(record["chunks"])]
+            engine.delete(ids=vector_ids)
+            document_registry.delete(document_id)
+            semantic_cache.clear()
+        except HTTPException:
+            raise
+        except Exception as error:
+            logger.exception("Could not delete PostgreSQL document %s", document_id)
+            raise HTTPException(
+                status_code=502,
+                detail="Could not delete this document from PostgreSQL. Please try again.",
+            ) from error
+
+    return {"deleted": True, "id": document_id, "filename": record["filename"]}
 
 
 @app.post("/api/chat")

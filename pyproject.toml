@@ -14,11 +14,15 @@ dependencies = [
     "langchain>=1.4.3",
     "pypdf",
     "python-dotenv",
-    "langchain_chroma",
+    "langchain-postgres",
+    "psycopg[binary]",
     "fastapi",
     "uvicorn[standard]",
     "python-multipart"
 ]
+
+[dependency-groups]
+migration = ["langchain-chroma"]
 
 [project.scripts]
 mvp-rag = "mvp_rag:main"
