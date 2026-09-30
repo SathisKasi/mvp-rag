@@ -1,33 +1,52 @@
 # SATHIS RAG
 
-## Run the Document Chat App
+## Run the Application
 
-1. Install the project dependencies from the project folder:
+The following steps use Windows PowerShell. You need Python 3.10 or newer and `uv`.
+
+1. Open PowerShell in the project folder:
+
+	```powershell
+	cd "D:\Sathis\Example\Python\mvp-rag"
+	```
+
+2. Check that `uv` is available. If it is not installed, install it with Python's package installer:
+
+	```powershell
+	uv --version
+	python -m pip install uv
+	```
+
+3. Install or synchronize the project dependencies. Run this again whenever dependencies change:
 
 	```powershell
 	uv sync
 	```
 
-2. Create a `.env` file in the project folder and add the API keys required by the configured models:
+4. Create a `.env` file in the project folder and add your provider API keys:
 
 	```text
 	GROQ_API_KEY=your-groq-api-key
 	GOOGLE_API_KEY=your-google-api-key
 	```
 
-	Keep `.env` private; it is excluded from Git.
+	Replace the example values with your own keys. Keep `.env` private; it is excluded from Git.
 
-3. Start the web app:
+5. Start the SATHIS RAG web application:
 
 	```powershell
-	uv run uvicorn web_app:app --reload
+	uv run uvicorn web_app:app --reload --host 127.0.0.1 --port 8000
 	```
 
-4. Open [http://127.0.0.1:8000](http://127.0.0.1:8000), upload a PDF, then ask questions about the uploaded documents.
+6. Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser. Choose or drop in a PDF, wait for indexing to finish, then enter a question or choose a suggested question.
 
-Uploaded PDF chunks are embedded and stored in the local `chroma_db` collection. The chat retrieves relevant chunks and sends them to the configured language model to draft an answer. The uploaded document itself is not kept in the project folder.
+PDF text is split into chunks, embedded, and stored in the local `chroma_db` collection. Relevant text is sent to the configured Google embedding and Groq language-model APIs. The uploaded PDF itself is processed from a temporary file and is not saved in the project folder.
 
-Stop the server with `Ctrl+C` in PowerShell.
+The running server also keeps a bounded in-memory semantic cache for one hour. It reuses an answer only when a new question's embedding is at least 0.98 cosine-similar to a cached question. Uploading a PDF clears the cache, and restarting the server starts with an empty cache. The chat API request and response format are unchanged.
+
+7. When finished, return to PowerShell and press `Ctrl+C` to stop the server.
+
+If port 8000 is already in use, start the app with `--port 8001` and open `http://127.0.0.1:8001` instead.
 
 ## Push This Project to GitHub
 

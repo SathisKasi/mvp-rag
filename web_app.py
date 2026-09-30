@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import tempfile
 from pathlib import Path
 
@@ -11,11 +12,13 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic import BaseModel, Field
 
-from config import engine, llm
+from config import embedding, engine, llm
+from semantic_cache import semantic_cache
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="SATHIS RAG")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -72,6 +75,7 @@ async def upload_pdf(file: UploadFile = File(...)) -> dict[str, object]:
 
     file_digest = hashlib.sha256(contents).hexdigest()
     ids = [f"{file_digest}-{index}" for index in range(len(chunks))]
+    semantic_cache.clear()
     try:
         engine.add_documents(chunks, ids=ids)
     except Exception as error:
@@ -79,6 +83,7 @@ async def upload_pdf(file: UploadFile = File(...)) -> dict[str, object]:
             status_code=502,
             detail="The PDF was read, but could not be saved to the vector database. Check your embedding API key and try again.",
         ) from error
+    semantic_cache.clear()
 
     return {"filename": filename, "pages": len(documents), "chunks": len(chunks)}
 
@@ -90,12 +95,23 @@ def chat(request: ChatRequest) -> dict[str, object]:
         raise HTTPException(status_code=400, detail="Enter a question first.")
 
     try:
-        matches = engine.similarity_search(question, k=4)
+        query_embedding = embedding.embed_query(question)
+        try:
+            cached_response = semantic_cache.lookup(query_embedding)
+        except Exception:
+            logger.warning("Semantic cache lookup failed; continuing without cache", exc_info=True)
+            cached_response = None
+        if cached_response is not None:
+            return cached_response
+
+        matches = engine.similarity_search_by_vector(query_embedding, k=4)
         if not matches:
-            return {
+            response = {
                 "answer": "I don't have any document content to search yet. Upload a PDF to get started.",
                 "sources": [],
             }
+            _cache_response(query_embedding, response)
+            return response
 
         context_parts: list[str] = []
         sources: list[dict[str, object]] = []
@@ -139,4 +155,13 @@ def chat(request: ChatRequest) -> dict[str, object]:
     answer = result.content
     if not isinstance(answer, str):
         answer = str(answer)
-    return {"answer": answer, "sources": sources}
+    response = {"answer": answer, "sources": sources}
+    _cache_response(query_embedding, response)
+    return response
+
+
+def _cache_response(embedding_vector: list[float], response: dict[str, object]) -> None:
+    try:
+        semantic_cache.store(embedding_vector, response)
+    except Exception:
+        logger.warning("Semantic cache write failed; returning the generated response", exc_info=True)
