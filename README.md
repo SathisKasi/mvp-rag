@@ -44,6 +44,8 @@ PDF text is split into chunks, embedded, and stored in the local `chroma_db` col
 
 The running server also keeps a bounded in-memory semantic cache for one hour. It reuses an answer only when a new question's embedding is at least 0.98 cosine-similar to a cached question. Uploading a PDF clears the cache, and restarting the server starts with an empty cache. The chat API request and response format are unchanged.
 
+Uploads are limited to 25 MB and must have a PDF filename and PDF file signature. Empty or unreadable PDFs and blank or overlong questions are rejected with a clear error. Document excerpts are treated as untrusted input by the assistant, and cache errors fall back to the normal retrieval and answer path.
+
 7. When finished, return to PowerShell and press `Ctrl+C` to stop the server.
 
 If port 8000 is already in use, start the app with `--port 8001` and open `http://127.0.0.1:8001` instead.

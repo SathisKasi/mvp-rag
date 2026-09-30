@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from math import fsum, sqrt
+from math import fsum, isfinite, sqrt
+from collections.abc import Sequence
 from threading import Lock
 from time import monotonic
 
@@ -21,14 +22,22 @@ class SemanticResponseCache:
         ttl_seconds: int = 3600,
         max_entries: int = 256,
     ) -> None:
+        if not 0.0 <= similarity_threshold <= 1.0:
+            raise ValueError("similarity_threshold must be between 0 and 1")
+        if ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be positive")
+        if max_entries <= 0:
+            raise ValueError("max_entries must be positive")
         self.similarity_threshold = similarity_threshold
         self.ttl_seconds = ttl_seconds
         self.max_entries = max_entries
         self._entries: list[CacheEntry] = []
         self._lock = Lock()
 
-    def lookup(self, embedding: list[float]) -> dict[str, object] | None:
-        query_vector = tuple(embedding)
+    def lookup(self, embedding: Sequence[float]) -> dict[str, object] | None:
+        query_vector = self._validated_vector(embedding)
+        if query_vector is None:
+            return None
         now = monotonic()
         with self._lock:
             self._remove_expired(now)
@@ -41,9 +50,11 @@ class SemanticResponseCache:
                     best_similarity = similarity
             return deepcopy(best_entry.response) if best_entry is not None else None
 
-    def store(self, embedding: list[float], response: dict[str, object]) -> None:
+    def store(self, embedding: Sequence[float], response: dict[str, object]) -> None:
+        query_vector = self._validated_vector(embedding)
+        if query_vector is None:
+            return
         now = monotonic()
-        query_vector = tuple(embedding)
         with self._lock:
             self._remove_expired(now)
             self._entries.append(CacheEntry(query_vector, deepcopy(response), now))
@@ -61,6 +72,16 @@ class SemanticResponseCache:
         ]
 
     @staticmethod
+    def _validated_vector(embedding: Sequence[float]) -> tuple[float, ...] | None:
+        try:
+            vector = tuple(float(value) for value in embedding)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not vector or not all(isfinite(value) for value in vector):
+            return None
+        return vector
+
+    @staticmethod
     def _cosine_similarity(left: tuple[float, ...], right: tuple[float, ...]) -> float:
         if len(left) != len(right) or not left:
             return 0.0
@@ -69,7 +90,7 @@ class SemanticResponseCache:
         if not left_norm or not right_norm:
             return 0.0
         dot_product = fsum(a * b for a, b in zip(left, right))
-        return dot_product / (left_norm * right_norm)
+        return max(-1.0, min(1.0, dot_product / (left_norm * right_norm)))
 
 
 semantic_cache = SemanticResponseCache()

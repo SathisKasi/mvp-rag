@@ -66,6 +66,10 @@ async function uploadFile(file) {
     showStatus(`${file.name} is not a PDF. Choose a .pdf file.`, true);
     return;
   }
+  if (file.size === 0) {
+    showStatus(`${file.name} is empty. Choose a different PDF.`, true);
+    return;
+  }
   if (file.size > 25 * 1024 * 1024) {
     showStatus(`${file.name} is larger than 25 MB.`, true);
     return;
@@ -79,8 +83,10 @@ async function uploadFile(file) {
 
   try {
     const response = await fetch("/api/upload", { method: "POST", body: formData });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.detail || "The PDF could not be added.");
+    const result = await readApiResponse(response, "The PDF could not be added.");
+    if (typeof result.filename !== "string" || !Number.isFinite(result.pages) || !Number.isFinite(result.chunks)) {
+      throw new Error("The server returned an invalid upload response.");
+    }
     addDocument(result);
     showStatus(`${result.filename} is ready. Added ${result.chunks} text chunks from ${result.pages} pages.`);
     showToast("PDF added to your knowledge base");
@@ -91,6 +97,21 @@ async function uploadFile(file) {
     uploadTrigger.querySelector(".upload-copy strong").textContent = "Add a PDF";
     fileInput.value = "";
   }
+}
+
+async function readApiResponse(response, fallbackMessage) {
+  let result = {};
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error(fallbackMessage);
+  }
+  if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error(fallbackMessage);
+  if (!response.ok) {
+    const detail = typeof result.detail === "string" ? result.detail : fallbackMessage;
+    throw new Error(detail);
+  }
+  return result;
 }
 
 function makeMessage(role, text, sources = []) {
@@ -177,8 +198,14 @@ async function askQuestion(question) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question: cleaned }),
     });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.detail || "The answer could not be generated.");
+    const result = await readApiResponse(response, "The answer could not be generated.");
+    if (
+      typeof result.answer !== "string"
+      || !Array.isArray(result.sources)
+      || !result.sources.every((source) => source && typeof source.filename === "string")
+    ) {
+      throw new Error("The server returned an invalid chat response.");
+    }
     document.querySelector("#typing-indicator")?.remove();
     conversation.append(makeMessage("assistant", result.answer, result.sources || []));
   } catch (error) {
